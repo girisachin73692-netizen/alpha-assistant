@@ -80,6 +80,30 @@ class AlphaListenerService : Service(), RecognitionListener {
     }
 
     /**
+     * Restarting the recognizer immediately after it finishes often silently
+     * fails ("busy") on many devices. Cancelling first and waiting a short
+     * moment makes every restart (after wake word, after a command, after an
+     * error) reliably work every single time, not just once.
+     */
+    private fun restartListening(delayMs: Long = 350) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                speechRecognizer.cancel()
+            } catch (e: Exception) {
+                // ignore - recognizer may already be idle
+            }
+            try {
+                speechRecognizer.startListening(recognizerIntent)
+            } catch (e: Exception) {
+                // if it still fails, try once more shortly after
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try { speechRecognizer.startListening(recognizerIntent) } catch (e2: Exception) {}
+                }, 500)
+            }
+        }, delayMs)
+    }
+
+    /**
      * Picks the best available female voice from the device's installed TTS voices.
      * Works with zero setup — no API key needed. Tries, in order:
      * 1. Any voice whose name literally says "female" (works on most engines).
@@ -198,7 +222,7 @@ class AlphaListenerService : Service(), RecognitionListener {
         val playedRealVoice = tryPlayVoiceReply(command) {
             mode = Mode.WAKE
             updateNotification("सुन रहा हूँ... ('Alpha' बोलिए)")
-            startListening()
+            restartListening()
         }
         if (playedRealVoice) return
 
@@ -211,7 +235,7 @@ class AlphaListenerService : Service(), RecognitionListener {
                     speak(textToSpeak) {
                         mode = Mode.WAKE
                         updateNotification("सुन रहा हूँ... ('Alpha' बोलिए)")
-                        startListening()
+                        restartListening()
                     }
                 }
             }
@@ -222,7 +246,7 @@ class AlphaListenerService : Service(), RecognitionListener {
         speak(AlphaBrain.textReplyFor(command)) {
             mode = Mode.WAKE
             updateNotification("सुन रहा हूँ... ('Alpha' बोलिए)")
-            startListening()
+            restartListening()
         }
     }
 
@@ -234,10 +258,10 @@ class AlphaListenerService : Service(), RecognitionListener {
                     mode = Mode.COMMAND
                     playWakeReplyAudio {
                         updateNotification("बोलिए, कमांड दीजिए...")
-                        startListening()
+                        restartListening()
                     }
                 } else {
-                    startListening()
+                    restartListening()
                 }
             }
             Mode.COMMAND -> handleCommand(text)
@@ -252,7 +276,9 @@ class AlphaListenerService : Service(), RecognitionListener {
 
     override fun onError(error: Int) {
         // Timeout / no speech / busy -> just keep listening, service never stops on its own.
-        startListening()
+        // Using restartListening() (cancel + short delay) instead of an immediate
+        // startListening() so the mic reliably comes back every time, not just once.
+        restartListening()
     }
 
     override fun onReadyForSpeech(params: Bundle?) {}
