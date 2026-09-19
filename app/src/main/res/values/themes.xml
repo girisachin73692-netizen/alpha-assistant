@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.AlphaAssistant" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+</resources>
