@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +30,7 @@ class AlphaListenerService : Service(), RecognitionListener {
     private lateinit var speechRecognizer: SpeechRecognizer
     private lateinit var recognizerIntent: Intent
     private lateinit var tts: TextToSpeech
+    private lateinit var audioManager: AudioManager
     private var ttsReady = false
 
     private enum class Mode { WAKE, COMMAND }
@@ -57,12 +59,19 @@ class AlphaListenerService : Service(), RecognitionListener {
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer.setRecognitionListener(this)
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            // Listen for longer before giving up on silence - this means far fewer
+            // "no speech detected" restarts, which is what was causing the rapid
+            // beep-beep-beep sound when nobody was talking.
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 4000)
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 4000)
+            putExtra("android.speech.extra.SPEECH_INPUT_MINIMUM_LENGTH_MILLIS", 15000)
         }
     }
 
@@ -76,7 +85,26 @@ class AlphaListenerService : Service(), RecognitionListener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startListening() {
+        muteBeepBriefly()
         speechRecognizer.startListening(recognizerIntent)
+    }
+
+    /**
+     * The Android speech recognizer plays a system "beep" sound (on the MUSIC
+     * stream) every single time listening starts - that's the "tup tup tup"
+     * sound. We can't remove the beep itself, but we can mute the MUSIC stream
+     * for the brief moment it plays, then automatically restore the volume so
+     * Alpha's own spoken replies (TTS/MediaPlayer) are still audible.
+     */
+    private fun muteBeepBriefly() {
+        try {
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
+        } catch (e: Exception) { }
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+            } catch (e: Exception) { }
+        }, 1200)
     }
 
     /**
@@ -93,11 +121,15 @@ class AlphaListenerService : Service(), RecognitionListener {
                 // ignore - recognizer may already be idle
             }
             try {
+                muteBeepBriefly()
                 speechRecognizer.startListening(recognizerIntent)
             } catch (e: Exception) {
                 // if it still fails, try once more shortly after
                 Handler(Looper.getMainLooper()).postDelayed({
-                    try { speechRecognizer.startListening(recognizerIntent) } catch (e2: Exception) {}
+                    try {
+                        muteBeepBriefly()
+                        speechRecognizer.startListening(recognizerIntent)
+                    } catch (e2: Exception) {}
                 }, 500)
             }
         }, delayMs)
@@ -218,6 +250,21 @@ class AlphaListenerService : Service(), RecognitionListener {
     }
 
     private fun handleCommand(command: String) {
+        // Weather queries answered directly using live location + free weather API.
+        if (WeatherHelper.isWeatherQuery(command)) {
+            updateNotification("मौसम पता कर रही हूँ...")
+            WeatherHelper.getWeather(this) { weatherReply ->
+                Handler(Looper.getMainLooper()).post {
+                    speak(weatherReply) {
+                        mode = Mode.WAKE
+                        updateNotification("सुन रहा हूँ... ('Alpha' बोलिए)")
+                        restartListening()
+                    }
+                }
+            }
+            return
+        }
+
         // First choice: a real recorded voice reply (same Kanika/ElevenLabs voice), if one matches.
         val playedRealVoice = tryPlayVoiceReply(command) {
             mode = Mode.WAKE

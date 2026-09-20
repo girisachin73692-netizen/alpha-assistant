@@ -57,6 +57,22 @@ class MainActivity : AppCompatActivity() {
         ) {
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+        val storagePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (ContextCompat.checkSelfPermission(this, storagePermission)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(storagePermission)
+        }
 
         if (needed.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1)
@@ -71,9 +87,11 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1 && grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        ) {
+        // Mic is the only permission that's truly required to start Alpha.
+        // Location/storage are optional extras - Alpha still starts without them.
+        val micIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
+        val micGranted = micIndex == -1 || (grantResults.getOrNull(micIndex) == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == 1 && micGranted) {
             startAlphaService()
         } else {
             tvStatus.text = "माइक्रोफोन परमिशन ज़रूरी है"
