@@ -48,6 +48,33 @@ object AlphaServerClient {
      * (server not running, wrong key, no network, etc.) so the caller can
      * fall back to a local reply instead of leaving the user hanging.
      */
+    fun sendHistory(history: List<Pair<String, String>>, onResult: (String?) -> Unit) {
+        if (!isConfigured()) { onResult(null); return }
+        val messages = JSONArray()
+        for ((role, content) in history) {
+            messages.put(JSONObject().put("role", role).put("content", content))
+        }
+        val body = JSONObject().put("messages", messages).toString()
+            .toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("$BASE_URL/v1/chat/completions")
+            .addHeader("x-api-key", ALPHA_API_KEY)
+            .post(body)
+            .build()
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) { onResult(null) }
+            override fun onResponse(call: Call, response: okhttp3.Response) {
+                try {
+                    if (!response.isSuccessful) { onResult(null); return }
+                    val raw = response.body?.string()
+                    val content = JSONObject(raw ?: "{}").optJSONArray("choices")
+                        ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                    onResult(content)
+                } catch (e: Exception) { onResult(null) }
+            }
+        })
+    }
+
     fun sendMessage(userMessage: String, onResult: (String?) -> Unit) {
         if (!isConfigured()) {
             onResult(null)
