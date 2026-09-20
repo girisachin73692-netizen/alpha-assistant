@@ -90,7 +90,7 @@ class ChatActivity : AppCompatActivity() {
                 runOnUiThread {
                     val answer = reply?.trim()
                     if (answer.isNullOrEmpty()) {
-                        thinking.text = "Server se jawab nahi mila - Termux mein server chal raha hai na check kar lo."
+                        thinking.text = "Server error: " + AlphaServerClient.lastError
                     } else {
                         thinking.text = answer
                         history.add("assistant" to answer)

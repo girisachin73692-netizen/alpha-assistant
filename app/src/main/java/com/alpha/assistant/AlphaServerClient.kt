@@ -40,6 +40,8 @@ object AlphaServerClient {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    @Volatile var lastError: String = ""
+
     fun isConfigured(): Boolean = ALPHA_API_KEY.isNotBlank()
 
     /**
@@ -62,15 +64,15 @@ object AlphaServerClient {
             .post(body)
             .build()
         client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) { onResult(null) }
+            override fun onFailure(call: Call, e: IOException) { lastError = e.toString(); onResult(null) }
             override fun onResponse(call: Call, response: okhttp3.Response) {
                 try {
-                    if (!response.isSuccessful) { onResult(null); return }
+                    if (!response.isSuccessful) { lastError = "HTTP " + response.code; onResult(null); return }
                     val raw = response.body?.string()
                     val content = JSONObject(raw ?: "{}").optJSONArray("choices")
                         ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                     onResult(content)
-                } catch (e: Exception) { onResult(null) }
+                } catch (e: Exception) { lastError = "parse " + e.toString(); onResult(null) }
             }
         })
     }
